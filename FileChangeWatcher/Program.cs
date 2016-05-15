@@ -9,11 +9,11 @@ namespace FileChangeWatcher
 {
     class Program
     {
+        private static Timer _timer;
         static void Main(string[] args)
         {
             Console.WriteLine("Starting Watch");
             RunWatch();
-
         }
 
         // Define other methods and classes here
@@ -30,8 +30,10 @@ namespace FileChangeWatcher
             // Create a new FileSystemWatcher and set its properties.
             /* Watch for changes in LastAccess and LastWrite times, and
                 the renaming of files or directories. */
-            watcher.NotifyFilter = NotifyFilters.LastAccess | NotifyFilters.LastWrite
-                | NotifyFilters.FileName | NotifyFilters.DirectoryName;
+            watcher.NotifyFilter = NotifyFilters.LastAccess | 
+                                   NotifyFilters.LastWrite  | 
+                                   NotifyFilters.FileName | 
+                                   NotifyFilters.DirectoryName;
             // Only watch text files.
             watcher.Filter = "*.txt";
 
@@ -40,12 +42,14 @@ namespace FileChangeWatcher
             watcher.Created += new FileSystemEventHandler(OnFileChanged);
             watcher.Deleted += new FileSystemEventHandler(OnFileChanged);
 
+            // Setup the Timer to trigger every 10 seconds.
+            _timer = new Timer(10000);
+            _timer.Elapsed += HandleChangedFiles;
+            
+            // Start Watching and Start Timer
             watcher.EnableRaisingEvents = true;
+            _timer.Start();
 
-            // Setup the Timer
-            System.Timers.Timer timer = new System.Timers.Timer(10000);
-            timer.Elapsed += HandleChangedFiles;
-            timer.Start();
 
             var input = Console.ReadLine();
             while (input != "q")
@@ -69,22 +73,41 @@ namespace FileChangeWatcher
         private static void OnFileChanged(object sender, FileSystemEventArgs args)
         {
             //Console.WriteLine("Type of change : {0} File To Change {1}", args.ChangeType, args.FullPath);
-            var key = Path.GetFileNameWithoutExtension(args.FullPath);// + args.ChangeType;
-            if (_fileDictionary.ContainsKey(key))
-            {
-                _fileDictionary[key] = new ChangeFileInfo { Action = args.ChangeType, FilePath = args.FullPath, Time = DateTime.Now };
+            var key = Path.GetFileNameWithoutExtension(args.FullPath);
+
+            lock (_fileDictionary) {
+
+                if (_fileDictionary.ContainsKey(key))
+                {
+                    _fileDictionary[key] = new ChangeFileInfo { Action = args.ChangeType, FilePath = args.FullPath, Time = DateTime.Now };
+                }
+                else
+                {
+                    _fileDictionary.Add(key, new ChangeFileInfo { Action = args.ChangeType, FilePath = args.FullPath, Time = DateTime.Now });
+                }
             }
-            else
-            {
-                _fileDictionary.Add(key, new ChangeFileInfo { Action = args.ChangeType, FilePath = args.FullPath, Time = DateTime.Now });
-            }
+
         }
 
+        /// <summary>
+        /// While handling the files we want to turn off the elapsed time event until everything completes do the handle
+        /// changes isn't called while it's already handling the previous event call. 
+        /// also lock the dictionary until everything has been completed, we don't want extra stuff in the dictionary
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="arg"></param>
         private static void HandleChangedFiles(object sender, ElapsedEventArgs arg)
         {
             Console.WriteLine("HANDLING CHANGED FILES");
-            Print();
-            _fileDictionary.Clear();
+            _timer.Elapsed -= HandleChangedFiles;
+
+            lock (_fileDictionary) {
+                Print();
+                _fileDictionary.Clear();
+            }
+
+            _timer.Elapsed += HandleChangedFiles;
+
         }
 
         private static void Print()
